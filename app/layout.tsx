@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://azure-study-room.ruby-cloud-8716.chatgpt.site'), title: 'Azure Study Room', description: 'An Azure study guide with interactive multiple-choice and matching practice', openGraph: {title:'Azure Study Room',description:'Learn the essentials. Test your understanding.',images:['https://azure-study-room.ruby-cloud-8716.chatgpt.site/og.png']},twitter:{card:'summary_large_image',title:'Azure Study Room',description:'Learn the essentials. Test your understanding.',images:['https://azure-study-room.ruby-cloud-8716.chatgpt.site/og.png']},
+  metadataBase: new URL('https://azure-study-room.jacksonpedvis.chatgpt.site'), title: 'Azure Study Room', description: 'An Azure study guide with interactive multiple-choice and matching practice', openGraph: {title:'Azure Study Room',description:'Learn the essentials. Test your understanding.',images:['https://azure-study-room.jacksonpedvis.chatgpt.site/og.png']},twitter:{card:'summary_large_image',title:'Azure Study Room',description:'Learn the essentials. Test your understanding.',images:['https://azure-study-room.jacksonpedvis.chatgpt.site/og.png']},
 };
 
 export default function RootLayout({

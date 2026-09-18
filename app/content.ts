@@ -1,3 +1,4 @@
+import {extraQuestions,extraMatches} from './extra-questions';
 export const base='https://learn.microsoft.com/en-us/training/modules/';
 export const topics=[
 {title:'Cloud computing',short:'Cloud concepts',source:'describe-cloud-compute/',lead:'Rent computing resources over the internet and adjust capacity as demand changes.',rows:[['Public cloud','A third-party provider offers services to many customers. Public does not mean your data is publicly accessible.'],['Private cloud','Resources dedicated to one organization, hosted on-site or elsewhere. More control also brings more management responsibility.'],['Hybrid cloud','Connected public and private environments; useful when some workloads stay private while others use public capacity.'],['Multicloud','Using more than one public cloud provider. Azure Arc helps manage resources across Azure, on-premises, and other clouds.'],['Consumption & costs','Pay for consumed resources. CapEx buys assets upfront; OpEx pays ongoing operating costs. Release unused resources to reduce spend.']],tip:'Deployment model = where it runs. Service model = what you manage.'},
@@ -43,10 +44,11 @@ const raw:[number,string,string[],number,string][]=[
 [8,'A customer already owns a software license and wants to apply it to an offer. Which listing fits?',['Contact me','Free trial','Transact only','BYOL'],3,'Bring your own license uses an existing license rather than purchasing that license through Microsoft commerce.'],
 [8,'What is the purpose of a marketplace private offer?',['Negotiate customer-specific commercial terms','Build a private datacenter','Make every product free','Create a resource group'],0,'Private offers allow tailored pricing and terms for particular customers.']
 ];
-export const questions:Question[]=raw.map(([topic,q,options,answer,why],id)=>({id,topic,q,options,answer,why}));
+export const questions:Question[]=[...raw,...extraQuestions].map(([topic,q,options,answer,why],id)=>({id,topic,q,options,answer,why}));
 export const matchSets=[
 {title:'Cloud vocabulary',topic:0,pairs:[['IaaS','Infrastructure with customer-managed guest OS'],['PaaS','Managed platform for your application code'],['SaaS','A complete provider-operated application'],['Hybrid cloud','Connected public and private cloud environments'],['OpEx','Ongoing operating expenditure']]},
 {title:'Azure organization',topic:4,pairs:[['Management group','Governance across subscriptions'],['Subscription','Billing and access boundary'],['Resource group','Lifecycle container for related resources'],['Availability zone','Independent datacenter grouping within a region'],['Region','Geographic area containing connected datacenters']]},
 {title:'Pick a storage or data service',topic:6,pairs:[['Blob Storage','Object data such as photos and videos'],['Azure Files','Managed network file shares'],['Queue Storage','Messages for asynchronous processing'],['Azure Cosmos DB','Globally distributed flexible NoSQL database'],['Azure Data Box','Physical transfer of large datasets']]},
 {title:'Tools and resilience',topic:6,pairs:[['AzCopy','Command-line file transfers'],['Storage Explorer','Graphical storage management'],['Azure File Sync','Windows Server synchronization with Azure file shares'],['LRS','Three copies in one datacenter'],['GZRS','Primary-zone redundancy plus secondary-region replication']]}
+,...extraMatches
 ];
