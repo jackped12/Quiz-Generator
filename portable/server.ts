@@ -6,7 +6,7 @@ import {spawn} from 'node:child_process';
 import {z} from 'zod';
 import {readArticle} from './articles';
 import {generateStudy} from './generate';
-import {sourceSchema,packSchema,validateStudy} from './schema';
+import {sourceSchema,packSchema,validateStudy,questionCountSchema} from './schema';
 const folder=path.resolve(process.env.STUDY_ROOM_DIR||process.cwd());
 const data=path.join(folder,'data','packs');const runfile=path.join(folder,'data','running.json');
 const token=randomBytes(32).toString('hex');let origin='';let activity=Date.now();let busy=false;
@@ -46,7 +46,7 @@ export const server=http.createServer(async(req,res)=>{
    }
    if(route==='/api/generate'&&req.method==='POST'){
     if(busy){json(res,409,{error:'A generation is already running. Wait for it to finish.'});return;}
-    const args=z.object({apiKey:z.string().min(10).max(500),model:z.string().regex(/^[a-zA-Z0-9._:-]{1,100}$/),sources:z.array(sourceSchema).min(1).max(10),questionCount:z.union([z.literal(10),z.literal(20),z.literal(30),z.literal(40)]),matchCount:z.union([z.literal(5),z.literal(10),z.literal(15),z.literal(20)]),depth:z.enum(['concise','detailed'])}).parse(await input(req));
+    const args=z.object({apiKey:z.string().min(10).max(500),model:z.string().regex(/^[a-zA-Z0-9._:-]{1,100}$/),sources:z.array(sourceSchema).min(1).max(10),questionCount:questionCountSchema,matchCount:z.union([z.literal(5),z.literal(10),z.literal(15),z.literal(20)]),depth:z.enum(['concise','detailed'])}).parse(await input(req));
     if(args.sources.reduce((n,s)=>n+s.text.length,0)>160000)throw new Error('Keep the combined article text below 160,000 characters.');
     busy=true;const controller=new AbortController();res.on('close',()=>controller.abort());
     try{const study=await generateStudy({...args,signal:controller.signal});const pack=await save({...study,version:1,id:randomUUID(),createdAt:new Date().toISOString(),sources:args.sources.map(({text,...s})=>s)});json(res,200,pack);}finally{args.apiKey='';busy=false;activity=Date.now();}return;

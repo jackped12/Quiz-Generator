@@ -4,7 +4,12 @@ START
 1. Extract the entire ZIP to a writable folder (for example, Documents).
 2. Open Study Room.exe. Your default browser opens the local app.
 3. Open Settings and enter your OpenAI API key.
-4. Choose New pack, paste article URLs (one per line), and click Generate study pack.
+4. Choose New pack, paste article URLs (one per line), choose 1-120 questions,
+   and click Generate study pack.
+
+Question counts above 40 are generated in batches to avoid oversized responses.
+Larger quizzes take longer and use more API credits. Matching pairs are selected
+separately. A pack is saved only after every batch passes validation.
 
 No Node.js installation is needed. Keep the entire extracted folder together.
 The executable is an unsigned personal application, not an installer.
