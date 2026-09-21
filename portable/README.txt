@@ -54,6 +54,9 @@ Export pack downloads a .study.json file you can import into another copy.
 Print guide opens the browser print dialog; choose Save as PDF if desired.
 Saved packs work without internet or an API key. New articles and AI generation
 need internet. Quiz answers reset when you leave a pack or refresh.
+Answer choices shuffle when you open a pack or start a new attempt, including
+lesson practice and missed-question retries. Correct answers are balanced across
+A, B, C, and D, with counts differing by at most one within each attempt.
 Copy the WHOLE portable folder to move both the app and your saved library.
 Refresh the Library by reopening the app after copying packs into data/packs.
 

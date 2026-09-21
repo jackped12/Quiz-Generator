@@ -5,10 +5,23 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import assert from 'node:assert/strict';
 const scratch=await fs.mkdtemp(path.join(os.tmpdir(),'study-room-test-'));
-await build({stdin:{contents:`export * from './portable/schema';export * from './portable/articles';export * from './portable/generate';`,resolveDir:process.cwd(),loader:'ts'},outfile:path.join(scratch,'core.cjs'),bundle:true,platform:'node',format:'cjs'});
-const {studySchema,packSchema,validateStudy,publicAddress,articleURL,extractArticle,readArticle,learnUnitURLs,generateStudy}=await import('file:///'+path.join(scratch,'core.cjs').replaceAll('\\','/'));
+await build({stdin:{contents:`export * from './portable/schema';export * from './portable/articles';export * from './portable/generate';export * from './portable/quiz';`,resolveDir:process.cwd(),loader:'ts'},outfile:path.join(scratch,'core.cjs'),bundle:true,platform:'node',format:'cjs'});
+const {studySchema,packSchema,validateStudy,publicAddress,articleURL,extractArticle,readArticle,learnUnitURLs,generateStudy,randomizeAnswers}=await import('file:///'+path.join(scratch,'core.cjs').replaceAll('\\','/'));
 let count=0;async function test(name,fn){await fn();count++;console.log('PASS '+name);}
 const fixture={title:'Plants',description:'An example study pack',lessons:[{title:'Photosynthesis',summary:'Plants use light to make sugars.',sourceIds:[0],concepts:[{term:'Light',explanation:'An energy source.'},{term:'Chlorophyll',explanation:'A pigment.'},{term:'Sugar',explanation:'Stores chemical energy.'}],sections:[{heading:'Process',text:'Plants capture light and build sugars.'},{heading:'Example',text:'A leaf exposed to light illustrates the process.'}],takeaway:'Light supports sugar production.',selfCheck:'What supplies energy?',selfAnswer:'Light.'}],questions:Array.from({length:10},(_,i)=>({q:'Example question '+i,options:['Light','Rock','Salt','Iron'],answer:i%4,why:'This fixture checks structural behavior, not biology content.',lesson:0,sourceIds:[0]})),matches:Array.from({length:5},(_,i)=>({term:'Term '+i,definition:'Definition '+i,why:'Explanation '+i,sourceIds:[0]}))};
+await test('balance answer positions for every supported count without changing correct option text',()=>{
+ for(let n=1;n<=120;n++){
+  const original=Array.from({length:n},(_,i)=>({...fixture.questions[i%10],q:'Question '+i,answer:0,why:'Option A is correct; choice B is incorrect. We answer a question.'}));
+  const before=JSON.stringify(original);const mixed=randomizeAnswers(original,()=>0.37);
+  const counts=[0,0,0,0];mixed.forEach((q,i)=>{counts[q.answer]++;assert.equal(q.options[q.answer],original[i].options[0]);assert.deepEqual([...q.options].sort(),[...original[i].options].sort());assert(q.why.includes('Option '+'ABCD'[q.answer]+' is correct'));assert(q.why.includes('choice '+'ABCD'[q.options.indexOf('Rock')]+' is incorrect'));assert(q.why.includes('answer a question'));});
+  assert(Math.max(...counts)-Math.min(...counts)<=1);assert.equal(JSON.stringify(original),before);
+ }
+});
+await test('fresh attempts can differ and reshuffling preserves grading',()=>{
+ const first=randomizeAnswers(fixture.questions,()=>0.1),second=randomizeAnswers(fixture.questions,()=>0.8);
+ assert.notDeepEqual(first.map(q=>q.options),second.map(q=>q.options));
+ const retry=randomizeAnswers(first.slice(0,5),()=>0.6);retry.forEach((q,i)=>assert.equal(q.options[q.answer],fixture.questions[i].options[fixture.questions[i].answer]));
+});
 const src={title:'Plants',url:'https://example.org/plants',text:'Plants capture energy from sunlight. '.repeat(30),truncated:false};
 await test('block private, link-local, reserved, and mapped addresses',()=>{for(const ip of ['127.0.0.1','10.2.3.4','172.16.0.1','192.168.2.1','169.254.169.254','100.64.0.1','0.0.0.0','::1','::ffff:127.0.0.1','224.1.1.1'])assert.equal(publicAddress(ip),false,ip);assert(publicAddress('8.8.8.8'));});
 await test('reject unsafe URL schemes, ports, credentials, and integer loopback',async()=>{for(const s of ['file:///etc/passwd','ftp://example.org','http://name:secret@example.org','http://example.org:445'])assert.throws(()=>articleURL(s));await assert.rejects(()=>readArticle('http://2130706433/'));await assert.rejects(()=>readArticle('http://[::1]/'));});
@@ -31,7 +44,7 @@ await test('custom counts and 120-question batching return exactly the requested
    const result=calls===0?{...fixture,questions}:{questions};total+=amount;calls++;
    return new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(result)}]}]}));
   }});
-  assert.equal(pack.questions.length,requested);assert.equal(calls,Math.ceil(requested/40));studySchema.parse(pack);validateStudy(pack,1);
+  assert.equal(pack.questions.length,requested);const counts=[0,0,0,0];pack.questions.forEach(q=>counts[q.answer]++);assert(Math.max(...counts)-Math.min(...counts)<=1);assert.equal(calls,Math.ceil(requested/40));studySchema.parse(pack);validateStudy(pack,1);
  }
 });
 await test('reject out-of-range and fractional counts before any API call',async()=>{for(const questionCount of [0,-1,121,5.5,NaN])await assert.rejects(()=>generateStudy({...common,questionCount,fetcher:async()=>{throw Error('should not request');}}),e=>!e.message.includes('should not request'));});
