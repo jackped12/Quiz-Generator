@@ -12,7 +12,7 @@ export const studySchema=z.object({
  questions:z.array(questionSchema).min(1).max(120),
  matches:z.array(z.object({term:text,definition:text,why:text,sourceIds:ids})).min(5).max(40)
 });
-export const sourceSchema=z.object({title:text,url:z.string().max(4096).refine(u=>!u||/^https?:\/\//i.test(u),'Invalid source URL'),text:z.string().min(100).max(30000),truncated:z.boolean().default(false)});
+export const sourceSchema=z.object({title:text,url:z.string().max(4096).refine(u=>!u||/^https?:\/\//i.test(u),'Invalid source URL'),text:z.string().min(100).max(30000),truncated:z.boolean().default(false),unitUrls:z.array(z.string().url().max(4096)).max(30).optional()});
 export const packSchema=studySchema.extend({version:z.literal(1),id:z.string().regex(/^[a-zA-Z0-9-]{1,80}$/),createdAt:z.string(),sources:z.array(sourceSchema.omit({text:true})).min(1).max(20)});
 export type Study=z.infer<typeof studySchema>;
 export type Pack=z.infer<typeof packSchema>;

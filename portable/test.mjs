@@ -6,7 +6,7 @@ import {spawn} from 'node:child_process';
 import assert from 'node:assert/strict';
 const scratch=await fs.mkdtemp(path.join(os.tmpdir(),'study-room-test-'));
 await build({stdin:{contents:`export * from './portable/schema';export * from './portable/articles';export * from './portable/generate';`,resolveDir:process.cwd(),loader:'ts'},outfile:path.join(scratch,'core.cjs'),bundle:true,platform:'node',format:'cjs'});
-const {studySchema,packSchema,validateStudy,publicAddress,articleURL,extractArticle,readArticle,generateStudy}=await import('file:///'+path.join(scratch,'core.cjs').replaceAll('\\','/'));
+const {studySchema,packSchema,validateStudy,publicAddress,articleURL,extractArticle,readArticle,learnUnitURLs,generateStudy}=await import('file:///'+path.join(scratch,'core.cjs').replaceAll('\\','/'));
 let count=0;async function test(name,fn){await fn();count++;console.log('PASS '+name);}
 const fixture={title:'Plants',description:'An example study pack',lessons:[{title:'Photosynthesis',summary:'Plants use light to make sugars.',sourceIds:[0],concepts:[{term:'Light',explanation:'An energy source.'},{term:'Chlorophyll',explanation:'A pigment.'},{term:'Sugar',explanation:'Stores chemical energy.'}],sections:[{heading:'Process',text:'Plants capture light and build sugars.'},{heading:'Example',text:'A leaf exposed to light illustrates the process.'}],takeaway:'Light supports sugar production.',selfCheck:'What supplies energy?',selfAnswer:'Light.'}],questions:Array.from({length:10},(_,i)=>({q:'Example question '+i,options:['Light','Rock','Salt','Iron'],answer:i%4,why:'This fixture checks structural behavior, not biology content.',lesson:0,sourceIds:[0]})),matches:Array.from({length:5},(_,i)=>({term:'Term '+i,definition:'Definition '+i,why:'Explanation '+i,sourceIds:[0]}))};
 const src={title:'Plants',url:'https://example.org/plants',text:'Plants capture energy from sunlight. '.repeat(30),truncated:false};
@@ -37,9 +37,35 @@ await test('custom counts and 120-question batching return exactly the requested
 await test('reject out-of-range and fractional counts before any API call',async()=>{for(const questionCount of [0,-1,121,5.5,NaN])await assert.rejects(()=>generateStudy({...common,questionCount,fetcher:async()=>{throw Error('should not request');}}),e=>!e.message.includes('should not request'));});
 await test('reject duplicates across batches and respect cancellation between batches',async()=>{
  const first={...fixture,questions:Array.from({length:40},(_,i)=>({...fixture.questions[0],q:'Question '+i}))};let calls=0;
- await assert.rejects(()=>generateStudy({...common,questionCount:41,fetcher:async()=>new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(calls++===0?first:{questions:[first.questions[0]]})}]}]}))}),/repeated/);
+ await assert.rejects(()=>generateStudy({...common,questionCount:41,fetcher:async()=>new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(calls++===0?first:{questions:[first.questions[0]]})}]}]}))}),/bounded retries/);
  const controller=new AbortController();calls=0;
  await assert.rejects(()=>generateStudy({...common,questionCount:120,signal:controller.signal,fetcher:async()=>{calls++;controller.abort();return new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(first)}]}]}));}}));assert.equal(calls,1);
+});
+
+const response=value=>new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(value)}]}]}));
+await test('recover short question and matching counts independently with exact request schemas',async()=>{
+ let calls=0;
+ const pack=await generateStudy({...common,fetcher:async(_url,opts)=>{
+  const b=JSON.parse(opts.body);calls++;
+  if(calls===1){assert.equal(b.text.format.schema.properties.questions.minItems,10);assert.equal(b.text.format.schema.properties.matches.maxItems,5);return response({...fixture,questions:fixture.questions.slice(0,8),matches:fixture.matches.slice(0,3)});}
+  if(calls===2){assert.equal(b.text.format.schema.properties.questions.minItems,2);return response({questions:[fixture.questions[8]]});}
+  if(calls===3)return response({questions:[fixture.questions[8],fixture.questions[9]]});
+  assert.equal(b.text.format.name,'matching_batch');return response({matches:fixture.matches.slice(3)});
+ }});assert.equal(calls,4);assert.equal(pack.questions.length,10);assert.equal(pack.matches.length,5);
+});
+await test('trim surplus questions and matching pairs',async()=>{
+ const pack=await generateStudy({...common,questionCount:3,fetcher:async()=>response(fixture)});assert.equal(pack.questions.length,3);
+});
+await test('discover only same-module lessons and balance module text across all units',async()=>{
+ const url='https://learn.microsoft.com/en-us/training/modules/example/';
+ const html='<main><h1>Example</h1><p>'+src.text+'</p><a href="1-first">First</a><a href="2a-second">Second</a><a href="3-knowledge-check">Check</a><a href="https://evil.example/4-unit">Other</a><a href="../other/1-first">Other module</a></main>';
+ assert.deepEqual(learnUnitURLs(html,url),[url+'1-first',url+'2a-second']);
+ const loader=async u=>({url:u,html:u===url?html:'<main><h1>'+u.split('/').pop()+'</h1><p>'+src.text.repeat(20)+'</p></main>'});
+ const source=await readArticle(url,undefined,2000,loader);assert.equal(source.unitUrls.length,2);assert(source.text.includes('1-first'));assert(source.text.includes('2a-second'));assert(source.text.length<=2000);assert(source.truncated);
+ await assert.rejects(()=>readArticle(url,undefined,2000,async u=>{if(u!==url)throw Error('unit unavailable');return {url:u,html};}),/Could not read module lesson/);
+});
+await test('real Microsoft Learn module includes lesson content',async()=>{
+ const source=await readArticle('https://learn.microsoft.com/en-us/training/modules/describe-cloud-compute/');assert(source.unitUrls.length>=5);assert(/shared responsibility/i.test(source.text));assert(/consumption/i.test(source.text));assert(source.text.length>6000);console.log('  Expanded module into '+source.unitUrls.length+' lessons, '+source.text.length+' characters.');
 });
 await test('included Azure pack imports with all 60 questions and 40 pairs',async()=>{const p=packSchema.parse(JSON.parse(await fs.readFile('outputs/Study Room/data/packs/azure-starter.json','utf8')));assert.equal(p.questions.length,60);assert.equal(p.matches.length,40);validateStudy(p,p.sources.length);});
 await test('real Microsoft Learn article extraction',async()=>{const s=await readArticle('https://learn.microsoft.com/en-us/training/modules/describe-cloud-compute/4-describe-shared-responsibility-model');assert(s.text.length>1000);assert(/responsib/i.test(s.title));assert(/physical/i.test(s.text));console.log('  Read '+s.text.length+' characters from Microsoft Learn.');});

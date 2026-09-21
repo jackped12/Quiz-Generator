@@ -10,6 +10,8 @@ START
 Question counts above 40 are generated in batches to avoid oversized responses.
 Larger quizzes take longer and use more API credits. Matching pairs are selected
 separately. A pack is saved only after every batch passes validation.
+Missing or repeated questions and matching pairs are automatically topped up,
+with at most three extra recovery requests per type to limit API spending.
 
 No Node.js installation is needed. Keep the entire extracted folder together.
 The executable is an unsigned personal application, not an installer.
@@ -32,12 +34,16 @@ Up to 10 public HTML/text article URLs at a time. The app extracts readable text
 then generates the guide, multiple-choice questions, and matching exercises.
 Each lesson and question includes source references. Review important claims.
 AI can make mistakes; structural validation is not a guarantee of factual accuracy.
-Use individual Microsoft Learn lesson links rather than only module overviews.
+Microsoft Learn module links automatically expand into their lesson pages.
+The loaded-source preview shows how many lessons were read. Plain URLs and
+pasted Markdown links are supported. Module assessments are excluded.
 Login-only, paywalled, PDF, JavaScript-only, and some bot-protected pages cannot
 be read automatically. Use "Paste article text instead" for those articles.
 The app does not bypass logins or paywalls. IPv6-only targets are not supported.
 Limits: 3 MB page download, 30,000 characters per article, 160,000 per pack.
 Long articles are trimmed and labeled. You can edit the loaded source text.
+The reading budget is shared across URLs and module lessons so later lessons
+are not dropped. A module with an unreadable lesson reports a reading failure.
 Partial reading failures pause generation so you can choose how to proceed.
 Cancel stops the local request; a provider may still charge for work already done.
 

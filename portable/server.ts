@@ -41,7 +41,7 @@ export const server=http.createServer(async(req,res)=>{
    if(route==='/api/read'&&req.method==='POST'){
     const {urls}=z.object({urls:z.array(z.string().max(4096)).min(1).max(10)}).parse(await input(req));
     const controller=new AbortController();res.on('close',()=>controller.abort());const results=[];
-    for(const url of [...new Set(urls)]){if(controller.signal.aborted)return;try{results.push({ok:true,source:await readArticle(url,controller.signal)});}catch(e){results.push({ok:false,url,error:e instanceof Error?e.message:'Unable to read article.'});}}
+    for(const url of [...new Set(urls)]){if(controller.signal.aborted)return;try{results.push({ok:true,source:await readArticle(url,controller.signal,Math.min(30000,Math.floor(160000/new Set(urls).size)))});}catch(e){results.push({ok:false,url,error:e instanceof Error?e.message:'Unable to read article.'});}}
     json(res,200,{results});return;
    }
    if(route==='/api/generate'&&req.method==='POST'){

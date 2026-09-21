@@ -41,4 +41,40 @@ export function extractArticle(html:string,url:string):Source{
  if(text.length<300)throw new Error('Not enough readable article text. This may be a login page or JavaScript-only site; paste the article text instead.');
  return {title:title.slice(0,500),url,text:text.slice(0,30000),truncated:text.length>30000};
 }
-export async function readArticle(url:string,signal?:AbortSignal){const page=await fetchArticleHTML(url,signal);return extractArticle(page.html,page.url);}
+export function learnUnitURLs(html:string,url:string){
+ const base=articleURL(url);
+ if(base.hostname!=='learn.microsoft.com'||!/^\/[\w-]+\/training\/modules\/[^/]+\/?$/.test(base.pathname))return [];
+ base.pathname=base.pathname.replace(/\/?$/,'/');
+ const {document}=parseHTML(html);const links=new Set<string>();
+ for(const a of document.querySelectorAll('a[href]')){
+  const unit=new URL(a.getAttribute('href')!,base);
+  const tail=unit.pathname.slice(base.pathname.length);
+  if(unit.origin===base.origin&&unit.pathname.startsWith(base.pathname)&&/^\d+[a-z]*-[^/]+\/?$/.test(tail)&&!/knowledge-check|check-knowledge|assessment/.test(tail)){
+   unit.search='';unit.hash='';links.add(unit.href);
+  }
+ }
+ return [...links].slice(0,30);
+}
+export async function readArticle(url:string,signal?:AbortSignal,budget=30000,loader=fetchArticleHTML){
+ const normalized=articleURL(url);
+ // A common copied marketplace link has an accidental trailing /m.
+ if(normalized.hostname==='learn.microsoft.com'&&normalized.pathname==='/en-us/training/modules/intro-commercial-marketplace/m')normalized.pathname='/en-us/training/modules/intro-commercial-marketplace/';
+ const page=await loader(normalized.href,signal);const source=extractArticle(page.html,page.url);
+ const units=learnUnitURLs(page.html,page.url);
+ if(!units.length)return {...source,text:source.text.slice(0,budget),truncated:source.truncated||source.text.length>budget};
+ const articles:Source[]=[];
+ for(const unit of units){
+  signal?.throwIfAborted();
+  try{const lesson=await loader(unit,signal);articles.push(extractArticle(lesson.html,lesson.url));}
+  catch(e){signal?.throwIfAborted();throw new Error(`Could not read module lesson ${unit}. ${e instanceof Error?e.message:'Please retry.'}`);}
+ }
+ const sections=articles.map(s=>`${s.title}\n${s.url}\n${s.text}`);
+ const allocations=sections.map(()=>0);
+ let remaining=budget-2*(sections.length-1);
+ // Short introductions keep only what they need; redistribute space to longer lessons.
+ const order=sections.map((s,i)=>i).sort((a,b)=>sections[a].length-sections[b].length);
+ order.forEach((index,position)=>{const take=Math.min(sections[index].length,Math.floor(remaining/(order.length-position)));allocations[index]=take;remaining-=take;});
+ let truncated=false;
+ const text=sections.map((s,i)=>{truncated ||= articles[i].truncated||s.length>allocations[i];return s.slice(0,allocations[i]);}).join('\n\n');
+ return {...source,text,truncated,unitUrls:articles.map(s=>s.url)};
+}
