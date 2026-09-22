@@ -47,6 +47,12 @@ are not dropped. A module with an unreadable lesson reports a reading failure.
 Partial reading failures pause generation so you can choose how to proceed.
 Cancel stops the local request; a provider may still charge for work already done.
 
+DIAGRAMS
+New guides include 1-2 diagrams per lesson: processes, comparisons, or concept
+maps. Diagrams use the lesson sources, work offline, and appear in Print guide.
+They are saved inside exported .study.json packs; no image service is needed.
+Older packs show concept maps made from their existing saved concepts.
+
 STUDY AND SAVE
 Generated packs are automatically saved in data/packs next to the executable.
 The included Azure pack has 60 questions and 40 matching pairs.

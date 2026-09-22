@@ -3,11 +3,17 @@ const text=z.string().min(1).max(16000);
 const ids=z.array(z.number().int().min(0).max(19)).min(1).max(20);
 export const questionCountSchema=z.number().int().min(1).max(120);
 export const questionSchema=z.object({q:text,options:z.array(text).length(4),answer:z.number().int().min(0).max(3),why:text,lesson:z.number().int().min(0).max(19),sourceIds:ids});
+export const diagramSchema=z.object({
+ type:z.enum(['flow','comparison','concept-map']),
+ title:z.string().min(1).max(160),caption:z.string().min(1).max(800),
+ items:z.array(z.object({label:z.string().min(1).max(100),detail:z.string().min(1).max(500)})).min(2).max(6)
+});
 export const studySchema=z.object({
  title:text,description:text,
  lessons:z.array(z.object({title:text,summary:text,sourceIds:ids,
  concepts:z.array(z.object({term:text,explanation:text})).min(3).max(16),
  sections:z.array(z.object({heading:text,text})).min(2).max(8),
+ diagrams:z.array(diagramSchema).min(1).max(2).optional(),
  takeaway:text,selfCheck:text,selfAnswer:text})).min(1).max(20),
  questions:z.array(questionSchema).min(1).max(120),
  matches:z.array(z.object({term:text,definition:text,why:text,sourceIds:ids})).min(5).max(40)
