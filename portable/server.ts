@@ -37,6 +37,11 @@ export const server=http.createServer(async(req,res)=>{
     json(res,200,packs.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)));return;
    }
    if(route.startsWith('/api/packs/')&&req.method==='GET'){const id=route.slice('/api/packs/'.length);if(!/^[a-zA-Z0-9-]{1,80}$/.test(id))throw new Error('Invalid pack ID.');const pack=await fs.readFile(path.join(data,id+'.json'),'utf8');json(res,200,packSchema.parse(JSON.parse(pack)));return;}
+   if(route==='/api/delete'&&req.method==='POST'){
+    const {id}=z.object({id:z.string().regex(/^[a-zA-Z0-9-]{1,80}$/)}).parse(await input(req));
+    await fs.rm(path.join(data,id+'.json'),{force:true});
+    json(res,200,{ok:true});return;
+   }
    if(route==='/api/import'&&req.method==='POST'){const p=packSchema.parse(await input(req));p.id=randomUUID();p.createdAt=new Date().toISOString();json(res,200,await save(p));return;}
    if(route==='/api/read'&&req.method==='POST'){
     const {urls}=z.object({urls:z.array(z.string().max(4096)).min(1).max(10)}).parse(await input(req));

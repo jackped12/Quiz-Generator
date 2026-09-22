@@ -94,6 +94,18 @@ try{
  await test('import, persistence, reload, invalid import, and safe path handling',async()=>{const pack={...fixture,version:1,id:'fixture',createdAt:new Date().toISOString(),sources:[{title:src.title,url:src.url,truncated:false}]};const r=await call('/api/import',pack);assert.equal(r.status,200);const imported=await r.json();assert(imported.id!=='fixture');const disk=await fs.readFile(path.join(scratch,'data','packs',imported.id+'.json'),'utf8');assert(!disk.includes('sk-test'));const reopened=await (await call('/api/packs/'+imported.id)).json();assert.equal(reopened.title,'Plants');assert.equal((await call('/api/import',{bad:true})).status,400);assert.equal((await call('/api/packs/%2e%2e%2fsecret')).status,400);});
  await test('read failures report per URL and generation rejects missing key',async()=>{const r=await call('/api/read',{urls:['http://127.0.0.1/']});const body=await r.json();assert.equal(body.results[0].ok,false);assert.equal((await call('/api/generate',{})).status,400);});
  await test('save and reload a 120-question pack, reject 121',async()=>{const pack={...fixture,questions:Array.from({length:120},(_,i)=>({...fixture.questions[0],q:'Saved question '+i})),version:1,id:'large-test',createdAt:new Date().toISOString(),sources:[{title:src.title,url:src.url,truncated:false}]};const saved=await call('/api/import',pack);assert.equal(saved.status,200);const p=await saved.json();assert.equal((await (await call('/api/packs/'+p.id)).json()).questions.length,120);pack.questions.push({...fixture.questions[0],q:'Too many'});assert.equal((await call('/api/import',pack)).status,400);for(const n of [0,121,3.5])assert.equal((await call('/api/generate',{...common,questionCount:n})).status,400);});
+ await test('delete packs persists on disk, protects other packs, and enforces session and safe IDs',async()=>{
+  const packs=await (await call('/api/packs')).json();const target=packs.find(p=>p.id!=='azure-starter');assert(target);
+  assert.equal((await fetch(state.origin+'/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:target.id})})).status,403);
+  assert.equal((await call('/api/delete',{id:target.id},{Origin:'https://evil.example'})).status,403);
+  for(const id of ['../outside','..', 'folder/file','folder\\file',''])assert.equal((await call('/api/delete',{id})).status,400);
+  assert.equal((await call('/api/delete',{id:target.id})).status,200);
+  await assert.rejects(()=>fs.stat(path.join(scratch,'data','packs',target.id+'.json')),e=>e.code==='ENOENT');
+  const remaining=await (await call('/api/packs')).json();assert.equal(remaining.length,packs.length-1);assert(!remaining.some(p=>p.id===target.id));
+  assert.equal((await call('/api/delete',{id:target.id})).status,200);
+  for(const p of remaining)assert.equal((await call('/api/delete',{id:p.id})).status,200);
+  assert.deepEqual(await (await call('/api/packs')).json(),[]);
+ });
  await test('quit stops the packaged backend',async()=>{assert.equal((await call('/api/quit',{})).status,200);await new Promise(r=>setTimeout(r,500));assert(child.exitCode!==null);});
 }finally{if(child.exitCode===null)child.kill();}
 console.log('\n'+count+' tests passed. Live paid OpenAI generation was not run; no API key was supplied.');

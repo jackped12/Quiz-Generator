@@ -51,6 +51,8 @@ STUDY AND SAVE
 Generated packs are automatically saved in data/packs next to the executable.
 The included Azure pack has 60 questions and 40 matching pairs.
 Export pack downloads a .study.json file you can import into another copy.
+Use Delete on a library card, then Delete permanently to remove that pack.
+This includes the starter pack. Export a backup first if you may want it later.
 Print guide opens the browser print dialog; choose Save as PDF if desired.
 Saved packs work without internet or an API key. New articles and AI generation
 need internet. Quiz answers reset when you leave a pack or refresh.
