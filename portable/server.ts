@@ -6,7 +6,11 @@ import {spawn} from 'node:child_process';
 import {z} from 'zod';
 import {readArticle} from './articles';
 import {generateStudy} from './generate';
-import {sourceSchema,packSchema,validateStudy,questionCountSchema} from './schema';
+import {readDocument} from './read-document';
+import {MAX_DOCUMENT_BYTES,validateDocument} from './document-upload';
+import {transcribeVideo} from './transcribe';
+import {MAX_VIDEO_BYTES,validateVideo} from './video';
+import {sourceSchema,packSchema,validateStudy,questionCountSchema,shortAnswerCountSchema} from './schema';
 const folder=path.resolve(process.env.STUDY_ROOM_DIR||process.cwd());
 const data=path.join(folder,'data','packs');const runfile=path.join(folder,'data','running.json');
 const token=randomBytes(32).toString('hex');let origin='';let activity=Date.now();let busy=false;
@@ -28,12 +32,46 @@ export const server=http.createServer(async(req,res)=>{
    const auth=req.headers.cookie?.split(';').some(c=>c.trim()===`study_session=${token}`)||req.headers['x-study-token']===token;
    if(!auth||req.headers.origin&&req.headers.origin!==origin){json(res,403,{error:'Session expired. Reopen Study Room.exe.'});return;}
    activity=Date.now();
+   if(route==='/api/document'&&req.method==='POST'){
+    if(busy){json(res,409,{error:'Another upload or generation is running. Wait for it to finish.'});return;}
+    if(req.headers['content-type']!=='application/octet-stream'){json(res,415,{error:'A document upload is required.'});return;}
+    const name=decodeURIComponent(z.string().min(1).max(2000).parse(req.headers['x-document-name']));
+    validateDocument(name,req.headers['content-length']===undefined?1:Number(req.headers['content-length']));
+    busy=true;const controller=new AbortController();res.on('close',()=>controller.abort());
+    try{
+     const parts:Buffer[]=[];let size=0;
+     for await(const chunk of req.iterator({destroyOnReturn:false})){
+      size+=chunk.length;if(size>MAX_DOCUMENT_BYTES)throw new Error('Documents must be 10 MB or smaller.');parts.push(chunk);
+     }
+     validateDocument(name,size);
+     const source=await readDocument(name,Buffer.concat(parts),controller.signal);
+     json(res,200,{source});
+    }finally{busy=false;activity=Date.now();}return;
+   }
+   if(route==='/api/transcribe'&&req.method==='POST'){
+    if(busy){json(res,409,{error:'Another transcription or generation is running. Wait for it to finish.'});return;}
+    if(req.headers['content-type']!=='application/octet-stream'){json(res,415,{error:'A video upload is required.'});return;}
+    const apiKey=z.string().min(10).max(500).parse(req.headers['x-openai-key']);
+    const name=decodeURIComponent(z.string().min(1).max(2000).parse(req.headers['x-video-name']));
+    validateVideo(name,req.headers['content-length']===undefined?1:Number(req.headers['content-length']));
+    busy=true;const controller=new AbortController();res.on('close',()=>controller.abort());
+    try{
+     const parts:Buffer[]=[];let size=0;
+     for await(const chunk of req.iterator({destroyOnReturn:false})){
+      size+=chunk.length;
+      if(size>MAX_VIDEO_BYTES)throw new Error('Videos must be 25 MB or smaller. Compress the video or split it into smaller clips first.');
+      parts.push(chunk);
+     }
+     const source=await transcribeVideo({apiKey,name,bytes:Buffer.concat(parts),signal:controller.signal});
+     json(res,200,{source});
+    }finally{busy=false;activity=Date.now();}return;
+   }
    if(req.method==='POST'&&req.headers['content-type']!=='application/json'){json(res,415,{error:'JSON required.'});return;}
    if(route==='/api/heartbeat'){json(res,200,{ok:true});return;}
    if(route==='/api/quit'&&req.method==='POST'){json(res,200,{ok:true});setTimeout(async()=>{await fs.rm(runfile,{force:true});process.exit(0);},200);return;}
    if(route==='/api/packs'&&req.method==='GET'){
     const files=(await fs.readdir(data)).filter(f=>f.endsWith('.json'));const packs=[];
-    for(const file of files){try{const p=packSchema.parse(JSON.parse(await fs.readFile(path.join(data,file),'utf8')));packs.push({id:p.id,title:p.title,description:p.description,createdAt:p.createdAt,questions:p.questions.length,matches:p.matches.length});}catch{/* Preserve but skip damaged files. */}}
+    for(const file of files){try{const p=packSchema.parse(JSON.parse(await fs.readFile(path.join(data,file),'utf8')));packs.push({id:p.id,title:p.title,description:p.description,createdAt:p.createdAt,questions:p.questions.length,shortAnswers:p.shortAnswers?.length??0,matches:p.matches.length});}catch{/* Preserve but skip damaged files. */}}
     json(res,200,packs.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)));return;
    }
    if(route.startsWith('/api/packs/')&&req.method==='GET'){const id=route.slice('/api/packs/'.length);if(!/^[a-zA-Z0-9-]{1,80}$/.test(id))throw new Error('Invalid pack ID.');const pack=await fs.readFile(path.join(data,id+'.json'),'utf8');json(res,200,packSchema.parse(JSON.parse(pack)));return;}
@@ -44,14 +82,14 @@ export const server=http.createServer(async(req,res)=>{
    }
    if(route==='/api/import'&&req.method==='POST'){const p=packSchema.parse(await input(req));p.id=randomUUID();p.createdAt=new Date().toISOString();json(res,200,await save(p));return;}
    if(route==='/api/read'&&req.method==='POST'){
-    const {urls}=z.object({urls:z.array(z.string().max(4096)).min(1).max(10)}).parse(await input(req));
+    const {urls}=z.object({urls:z.array(z.string().max(4096)).min(1).max(20)}).parse(await input(req));
     const controller=new AbortController();res.on('close',()=>controller.abort());const results=[];
     for(const url of [...new Set(urls)]){if(controller.signal.aborted)return;try{results.push({ok:true,source:await readArticle(url,controller.signal,Math.min(30000,Math.floor(160000/new Set(urls).size)))});}catch(e){results.push({ok:false,url,error:e instanceof Error?e.message:'Unable to read article.'});}}
     json(res,200,{results});return;
    }
    if(route==='/api/generate'&&req.method==='POST'){
     if(busy){json(res,409,{error:'A generation is already running. Wait for it to finish.'});return;}
-    const args=z.object({apiKey:z.string().min(10).max(500),model:z.string().regex(/^[a-zA-Z0-9._:-]{1,100}$/),sources:z.array(sourceSchema).min(1).max(10),questionCount:questionCountSchema,matchCount:z.union([z.literal(5),z.literal(10),z.literal(15),z.literal(20)]),depth:z.enum(['concise','detailed'])}).parse(await input(req));
+    const args=z.object({apiKey:z.string().min(10).max(500),model:z.string().regex(/^[a-zA-Z0-9._:-]{1,100}$/),sources:z.array(sourceSchema).min(1).max(20),questionCount:questionCountSchema,shortAnswerCount:shortAnswerCountSchema.default(0),matchCount:z.union([z.literal(5),z.literal(10),z.literal(15),z.literal(20)]),depth:z.enum(['concise','detailed'])}).parse(await input(req));
     if(args.sources.reduce((n,s)=>n+s.text.length,0)>160000)throw new Error('Keep the combined article text below 160,000 characters.');
     busy=true;const controller=new AbortController();res.on('close',()=>controller.abort());
     try{const study=await generateStudy({...args,signal:controller.signal});const pack=await save({...study,version:1,id:randomUUID(),createdAt:new Date().toISOString(),sources:args.sources.map(({text,...s})=>s)});json(res,200,pack);}finally{args.apiKey='';busy=false;activity=Date.now();}return;

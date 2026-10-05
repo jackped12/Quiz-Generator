@@ -5,10 +5,59 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import assert from 'node:assert/strict';
 const scratch=await fs.mkdtemp(path.join(os.tmpdir(),'study-room-test-'));
-await build({stdin:{contents:`export * from './portable/schema';export * from './portable/articles';export * from './portable/generate';export * from './portable/quiz';`,resolveDir:process.cwd(),loader:'ts'},outfile:path.join(scratch,'core.cjs'),bundle:true,platform:'node',format:'cjs'});
-const {studySchema,packSchema,validateStudy,publicAddress,articleURL,extractArticle,readArticle,learnUnitURLs,generateStudy,randomizeAnswers}=await import('file:///'+path.join(scratch,'core.cjs').replaceAll('\\','/'));
+await build({stdin:{contents:`export * from './portable/schema';export * from './portable/articles';export * from './portable/generate';export * from './portable/quiz';export * from './portable/video';export * from './portable/transcribe';export * from './portable/documents';export * from './portable/document-upload';`,resolveDir:process.cwd(),loader:'ts'},outfile:path.join(scratch,'core.cjs'),bundle:true,platform:'node',format:'cjs'});
+const {extractDocument,validateDocument,MAX_DOCUMENT_BYTES,shortAnswerSchema,validateVideo,transcribeVideo,MAX_VIDEO_BYTES,sourceSchema,studySchema,packSchema,validateStudy,publicAddress,articleURL,extractArticle,readArticle,learnUnitURLs,generateStudy,randomizeAnswers}=await import('file:///'+path.join(scratch,'core.cjs').replaceAll('\\','/'));
 let count=0;async function test(name,fn){await fn();count++;console.log('PASS '+name);}
 const fixture={title:'Plants',description:'An example study pack',lessons:[{title:'Photosynthesis',summary:'Plants use light to make sugars.',sourceIds:[0],diagrams:[{type:'flow',title:'Making sugars',caption:'A simplified process.',items:[{label:'Capture light',detail:'Chlorophyll captures light energy.'},{label:'Build sugars',detail:'Plants use the energy to make sugars.'}]}],concepts:[{term:'Light',explanation:'An energy source.'},{term:'Chlorophyll',explanation:'A pigment.'},{term:'Sugar',explanation:'Stores chemical energy.'}],sections:[{heading:'Process',text:'Plants capture light and build sugars.'},{heading:'Example',text:'A leaf exposed to light illustrates the process.'}],takeaway:'Light supports sugar production.',selfCheck:'What supplies energy?',selfAnswer:'Light.'}],questions:Array.from({length:10},(_,i)=>({q:'Example question '+i,options:['Light','Rock','Salt','Iron'],answer:i%4,why:'This fixture checks structural behavior, not biology content.',lesson:0,sourceIds:[0]})),matches:Array.from({length:5},(_,i)=>({term:'Term '+i,definition:'Definition '+i,why:'Explanation '+i,sourceIds:[0]}))};
+const shortFixture={q:'Explain how sunlight helps plants make sugars.',answer:'Chlorophyll captures sunlight. Its energy supports the production of sugars.',keyPoints:['Chlorophyll captures light.','Sugar stores chemical energy.'],lesson:0,sourceIds:[0]};
+await test('read Word documents, table text, UTF-8 and UTF-16 text with source metadata',async()=>{
+ const docx=await extractDocument('plants.docx',await fs.readFile('portable/fixtures/plants.docx'));assert(docx.text.includes('Chlorophyll'));assert(docx.text.includes('Table: Light'));assert.equal(docx.kind,'document');assert.equal(docx.title,'plants.docx');
+ const doc=await extractDocument('legacy.doc',await fs.readFile('portable/fixtures/legacy.doc'));assert(doc.text.length>=100);assert.equal(doc.kind,'document');
+ for(const name of ['notes.txt','notes.md']){const source=await extractDocument(name,Buffer.from(docx.text));assert.equal(source.text,docx.text);}
+ const utf16=await extractDocument('notes.txt',Buffer.concat([Buffer.from([255,254]),Buffer.from(docx.text,'utf16le')]));assert.equal(utf16.text,docx.text);
+ const long=await extractDocument('notes.txt',Buffer.from('a'.repeat(31000)));assert.equal(long.text.length,30000);assert(long.truncated);
+});
+await test('document validation rejects unsupported, oversized, empty, binary and corrupted files',async()=>{
+ for(const [name,size] of [['notes.pdf',100],['notes.doc',0],['notes.docx',MAX_DOCUMENT_BYTES+1]])assert.throws(()=>validateDocument(name,size));
+ await assert.rejects(()=>extractDocument('notes.docx',Buffer.from('not a docx')),/Could not read/);
+ await assert.rejects(()=>extractDocument('notes.doc',Buffer.from('not a doc')),/Could not read/);
+ await assert.rejects(()=>extractDocument('notes.txt',Buffer.from('hello')),/100 characters/);
+ await assert.rejects(()=>extractDocument('notes.txt',Buffer.from([0,255,0,255])),/Could not read/);
+});
+await test('short-answer schema validates references and preserves older packs',()=>{
+ const pack={...fixture,shortAnswers:[shortFixture]};validateStudy(studySchema.parse(pack),1);
+ validateStudy(studySchema.parse(fixture),1);
+ assert.throws(()=>shortAnswerSchema.parse({...shortFixture,keyPoints:[]}));
+ assert.throws(()=>validateStudy({...pack,shortAnswers:[{...shortFixture,lesson:1}]},1),/lesson/);
+ assert.throws(()=>validateStudy({...pack,shortAnswers:[{...shortFixture,sourceIds:[1]}]},1),/source references/);
+ assert.throws(()=>validateStudy({...pack,shortAnswers:[shortFixture,shortFixture]},1),/repeated/);
+});
+await test('video file validation rejects unsupported, empty, and oversized files',()=>{
+ for(const name of ['lecture.mp4','LECTURE.WEBM','lecture.mpeg','lecture.mpg'])validateVideo(name,MAX_VIDEO_BYTES);
+ for(const [name,size] of [['lecture.mov',100],['lecture.mp4',0],['lecture.mp4',MAX_VIDEO_BYTES+1],['lecture.mp4',NaN]])assert.throws(()=>validateVideo(name,size));
+});
+await test('video transcription uploads multipart media and produces an editable video source',async()=>{
+ const text='Plants capture sunlight and use it to create sugars. Water and carbon dioxide are involved in photosynthesis. '.repeat(3);
+ const source=await transcribeVideo({apiKey:'sk-test-key',name:'lecture.mp4',bytes:new Uint8Array([1,2,3]),fetcher:async(url,options)=>{
+  assert.equal(url,'https://api.openai.com/v1/audio/transcriptions');assert.equal(options.headers.Authorization,'Bearer sk-test-key');
+  assert.equal(options.body.get('model'),'gpt-4o-mini-transcribe');assert.equal(options.body.get('file').name,'lecture.mp4');assert.equal(options.body.get('file').size,3);
+  return Response.json({text});
+ }});
+ assert.equal(source.kind,'video');assert.equal(source.text,text.trim());assert.equal(source.url,'');assert.equal(source.truncated,false);sourceSchema.parse(source);
+ const pack=packSchema.parse({...fixture,version:1,id:'video-pack',createdAt:new Date().toISOString(),sources:[source]});
+ assert.equal(pack.sources[0].kind,'video');assert.equal(pack.sources[0].text,undefined);assert.equal(pack.sources[0].title,'lecture.mp4');
+ const generated=await generateStudy({apiKey:'sk-test-key',model:'test',sources:[source],questionCount:10,matchCount:5,depth:'concise',fetcher:async(url,options)=>{
+  const body=JSON.parse(options.body);const supplied=JSON.parse(body.input).sources[0];assert.equal(supplied.kind,'video');assert.equal(supplied.content,text.trim());return Response.json({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(fixture)}]}]});
+ }});assert.equal(generated.questions.length,10);assert.equal(generated.lessons.length,1);
+});
+await test('transcription handles trimming, empty speech, provider errors, and cancellation',async()=>{
+ const args={apiKey:'sk-test-key',name:'lecture.webm',bytes:new Uint8Array([1])};
+ const source=await transcribeVideo({...args,fetcher:async()=>Response.json({text:'a'.repeat(31000)})});assert.equal(source.text.length,30000);assert(source.truncated);
+ for(const text of ['', 'silence', null])await assert.rejects(()=>transcribeVideo({...args,fetcher:async()=>Response.json({text})}),/Not enough speech/);
+ for(const [status,message] of [[400,/spoken audio/],[401,/API key/],[403,/access/],[413,/too large/],[429,/billing/],[500,/failed/]])await assert.rejects(()=>transcribeVideo({...args,fetcher:async()=>new Response('',{status})}),message);
+ const c=new AbortController();c.abort();await assert.rejects(()=>transcribeVideo({...args,signal:c.signal,fetcher:async()=>{assert.fail('Cancelled uploads must not call the provider');}}),{name:'AbortError'});
+ await assert.rejects(()=>transcribeVideo({...args,fetcher:async()=>{throw new DOMException('timeout','TimeoutError');}}),/timed out/);
+});
 await test('balance answer positions for every supported count without changing correct option text',()=>{
  for(let n=1;n<=120;n++){
   const original=Array.from({length:n},(_,i)=>({...fixture.questions[i%10],q:'Question '+i,answer:0,why:'Option A is correct; choice B is incorrect. We answer a question.'}));
@@ -41,7 +90,7 @@ await test('trim long articles and mark truncation',()=>{const s=extractArticle(
 await test('reject unreadable pages',()=>assert.throws(()=>extractArticle('<html><body>Sign in</body></html>',src.url)));
 await test('validate question indexes, source coverage, and matching uniqueness',()=>{studySchema.parse(fixture);validateStudy(fixture,1);const bad=structuredClone(fixture);bad.questions[0].sourceIds=[7];assert.throws(()=>validateStudy(bad,1));bad.questions[0].sourceIds=[0];bad.matches[1].definition=bad.matches[0].definition;assert.throws(()=>validateStudy(bad,1));const badAnswer=structuredClone(fixture);badAnswer.questions[0].answer=4;assert.throws(()=>studySchema.parse(badAnswer));});
 const common={apiKey:'sk-test-not-real',model:'gpt-5-mini',sources:[src],questionCount:10,matchCount:5,depth:'detailed'};
-await test('structured generation request, untrusted-source separation, and parsing',async()=>{const pack=await generateStudy({...common,fetcher:async(url,opts)=>{assert.equal(url,'https://api.openai.com/v1/responses');assert.equal(opts.headers.Authorization,'Bearer sk-test-not-real');const b=JSON.parse(opts.body);assert.equal(b.store,false);assert.equal(b.text.format.strict,true);assert.equal(b.text.format.type,'json_schema');assert(b.text.format.schema.properties.lessons.items.required.includes('diagrams'));assert(!opts.body.includes('sk-test-not-real'));assert(b.instructions.includes('untrusted'));assert(JSON.parse(b.input).sources[0].article===src.text);return new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(fixture)}]}]}));}});assert.equal(pack.questions.length,10);});
+await test('structured generation request, untrusted-source separation, and parsing',async()=>{const pack=await generateStudy({...common,fetcher:async(url,opts)=>{assert.equal(url,'https://api.openai.com/v1/responses');assert.equal(opts.headers.Authorization,'Bearer sk-test-not-real');const b=JSON.parse(opts.body);assert.equal(b.store,false);assert.equal(b.text.format.strict,true);assert.equal(b.text.format.type,'json_schema');assert(b.text.format.schema.properties.lessons.items.required.includes('diagrams'));assert(!opts.body.includes('sk-test-not-real'));assert(b.instructions.includes('untrusted'));assert(JSON.parse(b.input).sources[0].content===src.text);return new Response(JSON.stringify({status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify(fixture)}]}]}));}});assert.equal(pack.questions.length,10);});
 await test('clear API key and billing errors without exposing provider payloads',async()=>{for(const status of [401,403,429])await assert.rejects(()=>generateStudy({...common,fetcher:async()=>new Response('secret upstream detail',{status})}),e=>!e.message.includes('secret')&&e.message.length>20);});
 await test('reject refusals, incomplete generation, invalid JSON, and wrong counts',async()=>{for(const response of [{status:'incomplete'},{status:'completed',output:[{content:[{type:'refusal',text:'No'}]}]},{status:'completed',output:[{content:[{type:'output_text',text:'not json'}]}]},{status:'completed',output:[{content:[{type:'output_text',text:JSON.stringify({...fixture,questions:fixture.questions.slice(0,9)})}]}]}])await assert.rejects(()=>generateStudy({...common,fetcher:async()=>new Response(JSON.stringify(response))}));});
 
@@ -77,6 +126,21 @@ await test('recover short question and matching counts independently with exact 
   assert.equal(b.text.format.name,'matching_batch');return response({matches:fixture.matches.slice(3)});
  }});assert.equal(calls,4);assert.equal(pack.questions.length,10);assert.equal(pack.matches.length,5);
 });
+await test('generate source-grounded short answers and recover duplicates to the requested count',async()=>{
+ let calls=0;const document={...src,kind:'document'};
+ const pack=await generateStudy({...common,sources:[document],questionCount:10,shortAnswerCount:3,fetcher:async(url,options)=>{
+  const body=JSON.parse(options.body);calls++;
+  if(calls===1){assert(!body.text.format.schema.properties.shortAnswers);return response(fixture);}
+  assert.equal(body.text.format.name,'short_answer_batch');const data=JSON.parse(body.input);assert.equal(data.sources[0].content,src.text);assert.equal(data.sources[0].kind,'document');
+  if(calls===2)return response({shortAnswers:[shortFixture,shortFixture]});
+  assert(data.excludedQuestions.includes(shortFixture.q));return response({shortAnswers:[{...shortFixture,q:'Compare light and sugar in photosynthesis.'},{...shortFixture,q:'Why do plants need light?'}]});
+ }});assert.equal(calls,3);assert.equal(pack.shortAnswers.length,3);
+});
+await test('short-answer limits, bounded retries and cancellation prevent partial packs',async()=>{
+ for(const shortAnswerCount of [-1,41,1.5])await assert.rejects(()=>generateStudy({...common,shortAnswerCount,fetcher:async()=>{assert.fail('Invalid counts must fail before API calls');}}));
+ let calls=0;await assert.rejects(()=>generateStudy({...common,shortAnswerCount:2,fetcher:async()=>{calls++;return response(calls===1?fixture:{shortAnswers:[shortFixture]});}}),/bounded retries/);assert.equal(calls,5);
+ const c=new AbortController();await assert.rejects(()=>generateStudy({...common,shortAnswerCount:1,signal:c.signal,fetcher:async()=>{c.abort();return response(fixture);}}),{name:'AbortError'});
+});
 await test('trim surplus questions and matching pairs',async()=>{
  const pack=await generateStudy({...common,questionCount:3,fetcher:async()=>response(fixture)});assert.equal(pack.questions.length,3);
 });
@@ -102,7 +166,32 @@ try{
  let state;for(let i=0;i<100;i++){try{state=JSON.parse(await fs.readFile(path.join(scratch,'data','running.json'),'utf8'));break;}catch{await new Promise(r=>setTimeout(r,100));}}assert(state,'Server startup failed: '+logs);
  const call=(route,body,headers={})=>fetch(state.origin+route,{method:body===undefined?'GET':'POST',headers:{'X-Study-Token':state.token,...(body===undefined?{}:{'Content-Type':'application/json'}),...headers},body:body===undefined?undefined:JSON.stringify(body)});
  await test('portable server serves app and enforces local session',async()=>{assert.equal((await fetch(state.origin+'/')).status,200);assert.equal((await fetch(state.origin+'/api/packs')).status,403);assert.equal((await call('/api/packs',undefined,{Origin:'https://evil.example'})).status,403);assert.equal((await call('/api/packs')).status,200);const r=await call('/api/session',{});assert(r.headers.get('set-cookie').includes('HttpOnly'));});
+ await test('document endpoint reads real files without an API key and enforces session and file limits',async()=>{
+  const upload=(name,body,headers={})=>fetch(state.origin+'/api/document',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Study-Token':state.token,'X-Document-Name':encodeURIComponent(name),...headers},body});
+  for(const name of ['plants.docx','legacy.doc']){const r=await upload(name,await fs.readFile('portable/fixtures/'+name));assert.equal(r.status,200);const {source}=await r.json();assert.equal(source.kind,'document');assert(source.text.length>=100);}
+  assert.equal((await upload('notes.txt',src.text,{'X-Study-Token':''})).status,403);
+  assert.equal((await upload('notes.txt',src.text,{Origin:'https://evil.example'})).status,403);
+  assert.equal((await upload('notes.txt',src.text,{'Content-Type':'application/json'})).status,415);
+  for(const [name,body] of [['notes.pdf',src.text],['notes.txt',''],['bad.docx','bad zip'],['large.txt',new Uint8Array(MAX_DOCUMENT_BYTES+1)]])assert.equal((await upload(name,body)).status,400);
+  const again=await upload('notes.txt',src.text);assert.equal(again.status,200);
+ });
+ await test('short answers and document source references survive save and reload',async()=>{
+  const pack={...fixture,shortAnswers:[shortFixture],version:1,id:'short-test',createdAt:new Date().toISOString(),sources:[{kind:'document',title:'plants.docx',url:'',truncated:false}]};
+  const saved=await call('/api/import',pack);assert.equal(saved.status,200);const p=await saved.json();const loaded=await (await call('/api/packs/'+p.id)).json();assert.deepEqual(loaded.shortAnswers,[shortFixture]);assert.equal(loaded.sources[0].kind,'document');
+  for(const shortAnswerCount of [-1,41,1.5])assert.equal((await call('/api/generate',{...common,shortAnswerCount})).status,400);
+ });
+ await test('video upload endpoint enforces session, origin, type, key, extension and size before paid calls',async()=>{
+  const upload=(headers={},body='fake')=>fetch(state.origin+'/api/transcribe',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Study-Token':state.token,'X-OpenAI-Key':'sk-test-key','X-Video-Name':'lecture.mp4',...headers},body});
+  assert.equal((await upload({'X-Study-Token':''})).status,403);
+  assert.equal((await upload({Origin:'https://evil.example'})).status,403);
+  assert.equal((await upload({'Content-Type':'application/json'})).status,415);
+  assert.equal((await upload({'X-OpenAI-Key':''})).status,400);
+  assert.match((await (await upload({'X-Video-Name':'lecture.mov'})).json()).error,/Choose an MP4/);
+  assert.match((await (await upload({},'')).json()).error,/empty/);
+  const r=await upload({},new Uint8Array(MAX_VIDEO_BYTES+1));assert.equal(r.status,400);assert.match((await r.json()).error,/25 MB/);
+ });
  await test('import, persistence, reload, invalid import, and safe path handling',async()=>{const pack={...fixture,version:1,id:'fixture',createdAt:new Date().toISOString(),sources:[{title:src.title,url:src.url,truncated:false}]};const r=await call('/api/import',pack);assert.equal(r.status,200);const imported=await r.json();assert(imported.id!=='fixture');const disk=await fs.readFile(path.join(scratch,'data','packs',imported.id+'.json'),'utf8');assert(!disk.includes('sk-test'));const reopened=await (await call('/api/packs/'+imported.id)).json();assert.equal(reopened.title,'Plants');assert.deepEqual(reopened.lessons[0].diagrams,fixture.lessons[0].diagrams);assert.equal((await call('/api/import',{bad:true})).status,400);assert.equal((await call('/api/packs/%2e%2e%2fsecret')).status,400);});
+ await test('accept 20 URLs and reject 21',async()=>{const urls=Array.from({length:20},(_,i)=>'http://127.0.0.1/article-'+i);const accepted=await call('/api/read',{urls});assert.equal(accepted.status,200);const body=await accepted.json();assert.equal(body.results.length,20);assert(body.results.every(r=>r.ok===false));assert.equal((await call('/api/read',{urls:[...urls,'http://127.0.0.1/article-20']})).status,400);});
  await test('read failures report per URL and generation rejects missing key',async()=>{const r=await call('/api/read',{urls:['http://127.0.0.1/']});const body=await r.json();assert.equal(body.results[0].ok,false);assert.equal((await call('/api/generate',{})).status,400);});
  await test('save and reload a 120-question pack, reject 121',async()=>{const pack={...fixture,questions:Array.from({length:120},(_,i)=>({...fixture.questions[0],q:'Saved question '+i})),version:1,id:'large-test',createdAt:new Date().toISOString(),sources:[{title:src.title,url:src.url,truncated:false}]};const saved=await call('/api/import',pack);assert.equal(saved.status,200);const p=await saved.json();assert.equal((await (await call('/api/packs/'+p.id)).json()).questions.length,120);pack.questions.push({...fixture.questions[0],q:'Too many'});assert.equal((await call('/api/import',pack)).status,400);for(const n of [0,121,3.5])assert.equal((await call('/api/generate',{...common,questionCount:n})).status,400);});
  await test('delete packs persists on disk, protects other packs, and enforces session and safe IDs',async()=>{

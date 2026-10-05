@@ -4,7 +4,7 @@ START
 1. Extract the entire ZIP to a writable folder (for example, Documents).
 2. Open Study Room.exe. Your default browser opens the local app.
 3. Open Settings and enter your OpenAI API key.
-4. Choose New pack, paste article URLs (one per line), choose 1-120 questions,
+4. Choose New pack, upload a document/video or paste article URLs (one per line), choose 1-120 questions,
    and click Generate study pack.
 
 Question counts above 40 are generated in batches to avoid oversized responses.
@@ -28,6 +28,60 @@ It is never saved in the portable folder or exported study packs. Refreshing
 the browser clears it. Use Forget key in Settings to clear it immediately.
 Article text is sent directly from this local app to OpenAI during generation.
 Generation requests use store: false; OpenAI's API data policies still apply.
+
+BATCH UPLOADS
+Use Ctrl or Shift in the file picker to select multiple files at once.
+The 10-source limit is shared across documents, videos, articles, and pasted text.
+Files are processed one at a time, with progress and a result for each file.
+Successful sources remain loaded if another file fails or you cancel. Failed or
+unprocessed files stay selected for retry; completed files are not uploaded again.
+
+UPLOADING DOCUMENTS
+Choose New pack, select up to 20 .doc, .docx, .txt, or .md files, then Read selected documents.
+Files can be up to 10 MB. Word/Office does not need to be installed.
+The app reads text locally without an API key. Review the extracted text in
+Loaded sources before generating; documents can be combined with videos,
+article links, and pasted text (10 total sources per pack).
+Only text is analyzed. Images, scanned pages, layout, and PDFs are not read.
+Save a text version or paste the text for unsupported documents. Encrypted or
+corrupt files show an error. At least 100 readable characters are required.
+Text over 30,000 characters is trimmed and labeled; generation uses only the
+shown text, with a combined limit of 160,000 characters across all sources.
+Generation sends selected text to OpenAI to analyze concepts, relationships,
+and applications and create source-grounded guides and questions.
+Original documents are not saved or exported, and are not uploaded to OpenAI.
+
+SHORT-ANSWER PRACTICE
+New packs default to 5 short-answer questions; choose 0-40 in New pack.
+These are additional to the chosen multiple-choice and matching counts.
+Questions include source references, a model answer, and 2-6 key points.
+Open Short answer in a generated pack, write your response, and Reveal model
+answer. Compare your reasoning with the key points, then mark Needs practice,
+Partly covered, or Covered well. This is self-assessment, not automatic grading.
+Your responses remain when switching study tabs, but reset when leaving the
+pack or refreshing. Start a new short-answer attempt clears all responses.
+Short-answer questions and model answers are saved/exported with the pack and
+work offline. Older packs still open normally without short-answer questions.
+Extra questions take more time and API credits. A pack is saved only after all
+requested question types pass validation, including bounded duplicate recovery.
+
+UPLOADING VIDEOS
+Choose New pack, select up to 20 videos, and click Upload and transcribe selected videos. Review or edit
+the transcript in Loaded sources, then click Generate study pack. Add multiple
+videos or combine them with articles and pasted text, up to 20 sources per pack.
+Supported videos: MP4, WebM, MPEG (.mpeg or .mpg), up to 25 MB per file.
+Compress or split larger recordings, or paste an existing transcript instead.
+Videos need spoken audio. Guides and quizzes use speech only; slides, silent
+demonstrations, and other visual content are not analyzed.
+Uploads are sent to OpenAI using gpt-4o-mini-transcribe and incur transcription
+costs in addition to generation. Your Settings model applies to pack generation.
+Videos are held in memory during transcription, not written to the portable
+folder or included in exported packs. Source filenames are saved for references.
+Transcripts remain editable in the tab; only generated material and source
+metadata are saved in packs, just like articles. Transcripts under 100 characters
+are rejected; those over 30,000 characters are trimmed and labeled.
+Cancel stops the request; completed transcripts stay loaded for reuse.
+API format/limit reference: https://developers.openai.com/api/docs/guides/speech-to-text
 
 READING ARTICLES
 Up to 10 public HTML/text article URLs at a time. The app extracts readable text,

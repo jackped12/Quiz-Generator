@@ -2,6 +2,8 @@ import {z} from 'zod';
 const text=z.string().min(1).max(16000);
 const ids=z.array(z.number().int().min(0).max(19)).min(1).max(20);
 export const questionCountSchema=z.number().int().min(1).max(120);
+export const shortAnswerCountSchema=z.number().int().min(0).max(40);
+export const shortAnswerSchema=z.object({q:text,answer:text,keyPoints:z.array(text).min(2).max(6),lesson:z.number().int().min(0).max(19),sourceIds:ids});
 export const questionSchema=z.object({q:text,options:z.array(text).length(4),answer:z.number().int().min(0).max(3),why:text,lesson:z.number().int().min(0).max(19),sourceIds:ids});
 export const diagramSchema=z.object({
  type:z.enum(['flow','comparison','concept-map']),
@@ -16,15 +18,18 @@ export const studySchema=z.object({
  diagrams:z.array(diagramSchema).min(1).max(2).optional(),
  takeaway:text,selfCheck:text,selfAnswer:text})).min(1).max(20),
  questions:z.array(questionSchema).min(1).max(120),
+ shortAnswers:z.array(shortAnswerSchema).max(40).optional(),
  matches:z.array(z.object({term:text,definition:text,why:text,sourceIds:ids})).min(5).max(40)
 });
-export const sourceSchema=z.object({title:text,url:z.string().max(4096).refine(u=>!u||/^https?:\/\//i.test(u),'Invalid source URL'),text:z.string().min(100).max(30000),truncated:z.boolean().default(false),unitUrls:z.array(z.string().url().max(4096)).max(30).optional()});
+export const sourceSchema=z.object({kind:z.enum(['article','video','document']).optional(),title:text,url:z.string().max(4096).refine(u=>!u||/^https?:\/\//i.test(u),'Invalid source URL'),text:z.string().min(100).max(30000),truncated:z.boolean().default(false),unitUrls:z.array(z.string().url().max(4096)).max(30).optional()});
 export const packSchema=studySchema.extend({version:z.literal(1),id:z.string().regex(/^[a-zA-Z0-9-]{1,80}$/),createdAt:z.string(),sources:z.array(sourceSchema.omit({text:true})).min(1).max(20)});
 export type Study=z.infer<typeof studySchema>;
 export type Pack=z.infer<typeof packSchema>;
 export type Source=z.infer<typeof sourceSchema>;
 export function validateStudy(study:Study,sourceCount:number){
- for(const item of [...study.lessons,...study.questions,...study.matches])if(item.sourceIds.some(id=>id>=sourceCount))throw new Error('The generated source references were invalid. Please try again.');
+ for(const item of [...study.lessons,...study.questions,...study.matches,...(study.shortAnswers??[])])if(item.sourceIds.some(id=>id>=sourceCount))throw new Error('The generated source references were invalid. Please try again.');
+ if((study.shortAnswers??[]).some(q=>q.lesson>=study.lessons.length))throw new Error('The short-answer lesson references were invalid. Please try again.');
+ if(new Set((study.shortAnswers??[]).map(q=>q.q.toLowerCase().trim())).size!==(study.shortAnswers??[]).length)throw new Error('The model repeated a short-answer question. Please try again.');
  if(study.questions.some(q=>q.lesson>=study.lessons.length||new Set(q.options.map(x=>x.toLowerCase().trim())).size!==4))throw new Error('The generated question choices were invalid. Please try again.');
  if(new Set(study.questions.map(q=>q.q.toLowerCase().trim())).size!==study.questions.length)throw new Error('The model repeated a question. Please try again.');
  if(new Set(study.matches.map(m=>m.term.toLowerCase().trim())).size!==study.matches.length||new Set(study.matches.map(m=>m.definition.toLowerCase().trim())).size!==study.matches.length)throw new Error('The generated matching pairs were not unique. Please try again.');
